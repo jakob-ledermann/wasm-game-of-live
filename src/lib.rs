@@ -1,7 +1,6 @@
 mod utils;
 
 use wasm_bindgen::prelude::*;
-use fixedbitset::FixedBitSet;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -21,7 +20,7 @@ pub enum Cell {
 pub struct Universe {
     width: usize,
     height: usize,
-    cells: FixedBitSet,
+    cells: Vec<Cell>,
 }
 
 impl Universe {
@@ -79,13 +78,24 @@ impl Universe {
                 let cell = self.cells[idx];
                 let live_neighbors = self.live_neighbor_count(row, col);
 
-                next.set(idx, match (cell, live_neighbors) {
-                    (true, x) if x < 2 => false,
-                    (true, 2) | (true, 3) => true,
-                    (true, x) if x > 3 => false,
-                    (false, 3) => true,
-                    (otherwise, _) => otherwise
-                });
+                let next_cell = match (cell, live_neighbors) {
+                    // Rule 1: Any live cell with fewer than two live neighbours
+                    // dies, as if caused by underpopulation.
+                    (Cell::Alive, x) if x < 2 => Cell::Dead,
+                    // Rule 2: Any live cell with two or three live neighbours
+                    // lives on to the next generation.
+                    (Cell::Alive, 2) | (Cell::Alive, 3) => Cell::Alive,
+                    // Rule 3: Any live cell with more than three live
+                    // neighbours dies, as if by overpopulation.
+                    (Cell::Alive, x) if x > 3 => Cell::Dead,
+                    // Rule 4: Any dead cell with exactly three live neighbours
+                    // becomes a live cell, as if by reproduction.
+                    (Cell::Dead, 3) => Cell::Alive,
+                    // All other cells remain in the same state.
+                    (otherwise, _) => otherwise,
+                };
+
+                next[idx] = next_cell;
             }
         }
 
@@ -97,7 +107,7 @@ impl Universe {
         let width = 64;
         let height = 64;
 
-        let mut cells = FixedBitSet::with_capacity(width * height);
+        let mut cells = Vec::with_capacity(width * height);
         for i in 0..cells.len() {
             cells.set(i, i % 2 == 0 || i % 7 == 0);
         }
@@ -112,7 +122,7 @@ impl Universe {
     pub fn new_spaceship() -> Universe {
         let width = 64;
         let height = 64;
-        let cells = FixedBitSet::with_capacity(width * height);
+        let cells = Vec::with_capacity(width * height);
 
         Universe {
             width,
@@ -126,7 +136,7 @@ impl Universe {
 
         let width = 64;
         let height = 64;
-        let mut cells = FixedBitSet::with_capacity(width * height);
+        let mut cells = Vec::with_capacity(width * height);
         for index in 0..cells.len()
         {
             let random = random();
@@ -148,7 +158,7 @@ impl Universe {
         self.height as u32
     }
 
-    pub fn cells(&self) -> *const u32 {
+    pub fn cells(&self) -> *const Cell {
         self.cells.as_slice().as_ptr()
     }
 
