@@ -51,6 +51,7 @@ impl Universe {
 
 use std::fmt;
 use crate::Cell::{Alive, Dead};
+use crate::universe_builder::*;
 
 impl fmt::Display for Universe {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
@@ -72,6 +73,10 @@ impl fmt::Display for Universe {
 /// Public methods, exported to JavaScript.
 #[wasm_bindgen]
 impl Universe {
+    pub fn build() -> EmptyUniverse {
+        EmptyUniverse {}
+    }
+
     pub fn tick(&mut self) {
         let mut next = self.cells.clone();
 
@@ -80,14 +85,14 @@ impl Universe {
                 let idx = self.get_index(row, col);
                 let cell = self.cells[idx];
                 let live_neighbors = self.live_neighbor_count(row, col);
-                log!(
+/*                log!(
                     "cell[{}, {}] is initially {:?} and has {} live neighbors",
                     row,
                     col,
                     cell,
                     live_neighbors
                 );
-
+*/
                 let next_cell = match (cell, live_neighbors) {
                     // Rule 1: Any live cell with fewer than two live neighbours
                     // dies, as if caused by underpopulation.
@@ -104,9 +109,9 @@ impl Universe {
                     // All other cells remain in the same state.
                     (otherwise, _) => otherwise,
                 };
-
+/*
                 log!("    it becomes {:?}", next_cell);
-
+*/
                 next[idx] = next_cell;
             }
         }
