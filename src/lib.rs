@@ -134,6 +134,11 @@ impl Universe {
     pub fn render(&self) -> String {
         self.to_string()
     }
+
+    pub fn toggle_cell(&mut self, row: u32, col: u32) {
+        let idx = self.get_index(row as usize, col as usize);
+        self.cells[idx].toggle();
+    }
 }
 
 impl Universe {
@@ -145,6 +150,15 @@ impl Universe {
         for (row, col) in cells.iter().cloned() {
             let idx = self.get_index(row, col);
             self.cells[idx] = Cell::Alive;
+        }
+    }
+}
+
+impl Cell {
+    pub fn toggle(&mut self) {
+        *self = match *self {
+            Dead => Alive,
+            Alive => Dead,
         }
     }
 }
