@@ -1,0 +1,70 @@
+Index: src/lib.rs
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>#[macro_use]\r\nmod utils;\r\n\r\nuse wasm_bindgen::prelude::*;\r\n\r\npub mod universe_builder;\r\npub mod timer;\r\n\r\n// When the `wee_alloc` feature is enabled, use `wee_alloc` as the global\r\n// allocator.\r\n#[cfg(feature = \"wee_alloc\")]\r\n#[global_allocator]\r\nstatic ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;\r\n\r\n#[wasm_bindgen]\r\n#[repr(u8)]\r\n#[derive(Clone, Copy, Debug, PartialEq, Eq)]\r\npub enum Cell {\r\n    Dead = 0,\r\n    Alive = 1,\r\n}\r\n\r\n#[wasm_bindgen]\r\npub struct Universe {\r\n    width: usize,\r\n    height: usize,\r\n    cells: Vec<Cell>,\r\n}\r\n\r\nimpl Universe {\r\n    fn get_index(&self, row: usize, column: usize) -> usize {\r\n        (row * self.width + column) as usize\r\n    }\r\n\r\n    fn live_neighbor_count(&self, row: usize, column: usize) -> u8 {\r\n        let mut count = 0;\r\n        for delta_row in [self.height - 1, 0, 1].iter().cloned() {\r\n            for delta_col in [self.width - 1, 0, 1].iter().cloned() {\r\n                if delta_row == 0 && delta_col == 0 {\r\n                    continue;\r\n                }\r\n\r\n                let neighbor_row = (row + delta_row) % self.height;\r\n                let neighbor_col = (column + delta_col) % self.width;\r\n                let idx = self.get_index(neighbor_row, neighbor_col);\r\n                count += self.cells[idx] as u8;\r\n            }\r\n        }\r\n        count\r\n    }\r\n}\r\n\r\nuse std::fmt;\r\nuse crate::Cell::{Alive, Dead};\r\nuse crate::universe_builder::*;\r\nuse crate::timer::Timer;\r\n\r\nimpl fmt::Display for Universe {\r\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {\r\n        for line in self.cells.as_slice().chunks(self.width as usize / 8) {\r\n            for &cell in line {\r\n                let symbol = match cell {\r\n                    Alive => '◼',\r\n                    Dead => '◻',\r\n                };\r\n                write!(f, \"{}\", symbol)?;\r\n            }\r\n            write!(f, \"\\n\")?;\r\n        }\r\n\r\n        Ok(())\r\n    }\r\n}\r\n\r\n/// Public methods, exported to JavaScript.\r\n#[wasm_bindgen]\r\nimpl Universe {\r\n    pub fn build() -> EmptyUniverse {\r\n        EmptyUniverse {}\r\n    }\r\n\r\n    pub fn tick(&mut self) {\r\n        let _timer = Timer::new(\"Universe::tick\");\r\n        let mut next = self.cells.clone();\r\n\r\n        for row in 0..self.height {\r\n            for col in 0..self.width {\r\n                let idx = self.get_index(row, col);\r\n                let cell = self.cells[idx];\r\n                let live_neighbors = self.live_neighbor_count(row, col);\r\n/*                log!(\r\n                    \"cell[{}, {}] is initially {:?} and has {} live neighbors\",\r\n                    row,\r\n                    col,\r\n                    cell,\r\n                    live_neighbors\r\n                );\r\n*/\r\n                let next_cell = match (cell, live_neighbors) {\r\n                    // Rule 1: Any live cell with fewer than two live neighbours\r\n                    // dies, as if caused by underpopulation.\r\n                    (Cell::Alive, x) if x < 2 => Cell::Dead,\r\n                    // Rule 2: Any live cell with two or three live neighbours\r\n                    // lives on to the next generation.\r\n                    (Cell::Alive, 2) | (Cell::Alive, 3) => Cell::Alive,\r\n                    // Rule 3: Any live cell with more than three live\r\n                    // neighbours dies, as if by overpopulation.\r\n                    (Cell::Alive, x) if x > 3 => Cell::Dead,\r\n                    // Rule 4: Any dead cell with exactly three live neighbours\r\n                    // becomes a live cell, as if by reproduction.\r\n                    (Cell::Dead, 3) => Cell::Alive,\r\n                    // All other cells remain in the same state.\r\n                    (otherwise, _) => otherwise,\r\n                };\r\n/*\r\n                log!(\"    it becomes {:?}\", next_cell);\r\n*/\r\n                next[idx] = next_cell;\r\n            }\r\n        }\r\n\r\n        self.cells = next;\r\n    }\r\n\r\n    pub fn width(&self) -> u32 {\r\n        self.width as u32\r\n    }\r\n\r\n    pub fn height(&self) -> u32 {\r\n        self.height as u32\r\n    }\r\n\r\n    pub fn cells(&self) -> *const Cell {\r\n        self.cells.as_slice().as_ptr()\r\n    }\r\n\r\n    pub fn render(&self) -> String {\r\n        self.to_string()\r\n    }\r\n\r\n    pub fn toggle_cell(&mut self, row: u32, col: u32) {\r\n        let idx = self.get_index(row as usize, col as usize);\r\n        self.cells[idx].toggle();\r\n    }\r\n}\r\n\r\nimpl Universe {\r\n    pub fn get_cells(&self) -> &[Cell] {\r\n        &self.cells\r\n    }\r\n\r\n    pub fn set_cells(&mut self, cells: &[(usize, usize)])  {\r\n        for (row, col) in cells.iter().cloned() {\r\n            let idx = self.get_index(row, col);\r\n            self.cells[idx] = Cell::Alive;\r\n        }\r\n    }\r\n}\r\n\r\nimpl Cell {\r\n    pub fn toggle(&mut self) {\r\n        *self = match *self {\r\n            Dead => Alive,\r\n            Alive => Dead,\r\n        }\r\n    }\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- src/lib.rs	(revision 5f203d12909e6ac588dd4d94abb0f73c2e24d983)
++++ src/lib.rs	(date 1602900788834)
+@@ -33,19 +33,48 @@
+     }
+ 
+     fn live_neighbor_count(&self, row: usize, column: usize) -> u8 {
+-        let mut count = 0;
+-        for delta_row in [self.height - 1, 0, 1].iter().cloned() {
+-            for delta_col in [self.width - 1, 0, 1].iter().cloned() {
+-                if delta_row == 0 && delta_col == 0 {
+-                    continue;
+-                }
++        let north = if row == 0 {
++            self.height - 1
++        } else {
++            row - 1
++        };
++
++        let south = if row == self.height - 1 {
++            0
++        } else {
++            row + 1
++        };
+ 
+-                let neighbor_row = (row + delta_row) % self.height;
+-                let neighbor_col = (column + delta_col) % self.width;
+-                let idx = self.get_index(neighbor_row, neighbor_col);
+-                count += self.cells[idx] as u8;
+-            }
+-        }
++        let west = if column == 0 {
++            self.width - 1
++        } else {
++            column - 1
++        };
++
++        let east = if column == self.width - 1 {
++            0
++        } else {
++            column + 1
++        };
++
++        let neighbors = [
++            (north, west),
++            (north, column),
++            (north, east),
++            (row, west),
++            (row, east),
++            (south, west),
++            (south, column),
++            (south, east)
++        ];
++
++        let count = neighbors
++            .iter()
++            .map(|(r, c)| {
++            let index = self.get_index(*r, *c);
++            self.cells[index] as u8
++        }).sum();
++
+         count
+     }
+ }

@@ -33,6 +33,12 @@ fixedbitset = "0.3.1"
 version = "0.3"
 features = [
     "console",
+    'CanvasRenderingContext2d',
+    'WebGlBuffer',
+    'WebGlRenderingContext',
+    'WebGlUniformLocation',
+    'WebGlProgram',
+    'WebGlShader',
 ]
 
 [dev-dependencies]
