@@ -255,13 +255,14 @@ fn initialize_grid(size: Size, ctx: &WebGlRenderingContext) -> GridRenderProgram
 }
 
 fn get_rect(x: f32, y: f32) -> [Vec2<f32>; 6] {
+    let half_margin = 0.05;
     [
-        Vec2::new(x + 0.05, y + 0.05),
-        Vec2::new(x + 0.05, y + 0.95),
-        Vec2::new(x + 0.95, y + 0.05),
-        Vec2::new(x + 0.05, y + 0.95),
-        Vec2::new(x + 0.95, y + 0.05),
-        Vec2::new(x + 0.95, y + 0.95),
+        Vec2::new(x + half_margin, y + half_margin), // top left
+        Vec2::new(x + half_margin, y + 1.0 - half_margin), // top right
+        Vec2::new(x + 1.0 - half_margin, y + half_margin), // bottom left
+        Vec2::new(x + half_margin, y + 1f32 - half_margin), // top right
+        Vec2::new(x + 1f32 - half_margin, y + half_margin), // bottom left
+        Vec2::new(x + 1f32 - half_margin, y + 1f32 - half_margin), // bottom right
     ]
 }
 
@@ -271,7 +272,7 @@ struct CellRenderProgram {
     alive: WebGlBufferedData,
 }
 
-fn init_cells(size: Size, ctx: &WebGlRenderingContext) -> CellRenderProgram {
+fn initialize_cells(size: Size, ctx: &WebGlRenderingContext) -> CellRenderProgram {
     let vertex_shader = compile_shader(
         ctx,
         WebGlRenderingContext::VERTEX_SHADER,
@@ -285,7 +286,9 @@ fn init_cells(size: Size, ctx: &WebGlRenderingContext) -> CellRenderProgram {
         r#"
         varying lowp float frag_alive;
         void main() {
-            gl_FragColor = vec4(1.0 - frag_alive, 1.0 - frag_alive, 1.0 - frag_alive, 1.0);
+            highp vec3 color = vec3(1.0, 1.0, 1.0);
+            color = (1.0 - frag_alive) * color;            
+            gl_FragColor = vec4(color, 1.0);
         }
     "#,
     )
@@ -361,7 +364,7 @@ impl Renderer for WebGLRenderer {
     fn init(universe: &Universe, context: &Self::Context) -> WebGLRenderer {
         WebGLRenderer {
             grid: initialize_grid(universe.size, context),
-            cells: init_cells(universe.size, context),
+            cells: initialize_cells(universe.size, context),
             size: universe.size,
         }
     }
