@@ -3,7 +3,115 @@ use crate::{Cell, Size, Universe};
 use js_sys::{Float32Array, Int32Array};
 use web_sys::{WebGlBuffer, WebGlProgram, WebGlRenderingContext, WebGlShader};
 
-pub struct WebGLRenderer {}
+pub struct WebGLRenderer {
+    grid: GridRenderProgram,
+    cells: CellRenderProgram,
+    size: Size,
+}
+
+impl WebGLRenderer {
+    fn render_grid(&self, size: Size, ctx: &WebGlRenderingContext) {
+        let grid = &self.grid;
+        ctx.use_program(Some(&grid.program));
+
+        if let Some(size_location) = ctx.get_uniform_location(&grid.program, "size") {
+            ctx.uniform2i(Some(&size_location), size.width as i32, size.height as i32);
+        }
+
+        ctx.bind_buffer(
+            WebGlRenderingContext::ARRAY_BUFFER,
+            Some(&grid.buffer.buffer),
+        );
+        ctx.vertex_attrib_pointer_with_i32(0, 2, WebGlRenderingContext::FLOAT, false, 0, 0);
+        ctx.enable_vertex_attrib_array(0);
+
+        ctx.draw_arrays(
+            WebGlRenderingContext::LINES,
+            0,
+            (grid.buffer.vertex_count) as i32,
+        );
+    }
+
+    fn render_cells(&self, universe: &Universe, ctx: &WebGlRenderingContext) {
+        let size = universe.size;
+        assert_eq!(size, self.size);
+        let cells = &self.cells;
+        let alive_data: Vec<f32> = universe
+            .get_cells()
+            .iter()
+            .flat_map(|cell| {
+                vec![
+                    match cell {
+                        Cell::Alive => 1.0f32,
+                        Cell::Dead => 0.0f32,
+                    };
+                    6
+                ]
+                .into_iter()
+            })
+            .collect();
+
+        ctx.bind_buffer(
+            WebGlRenderingContext::ARRAY_BUFFER,
+            Some(&cells.alive.buffer),
+        );
+
+        unsafe {
+            let vert_array = js_sys::Float32Array::view(&alive_data);
+
+            ctx.buffer_data_with_array_buffer_view(
+                WebGlRenderingContext::ARRAY_BUFFER,
+                &vert_array,
+                WebGlRenderingContext::DYNAMIC_DRAW,
+            );
+        }
+
+        ctx.use_program(Some(&cells.program));
+
+        if let Some(size_location) = ctx.get_uniform_location(&cells.program, "size") {
+            ctx.uniform2i(Some(&size_location), size.width as i32, size.height as i32);
+        }
+
+        ctx.bind_buffer(
+            WebGlRenderingContext::ARRAY_BUFFER,
+            Some(&cells.rects.buffer),
+        );
+        let position_attrib_idx = ctx.get_attrib_location(&cells.program, "position") as u32;
+        ctx.vertex_attrib_pointer_with_i32(
+            position_attrib_idx,
+            2,
+            WebGlRenderingContext::FLOAT,
+            false,
+            0,
+            0,
+        );
+        ctx.enable_vertex_attrib_array(position_attrib_idx);
+
+        let alive_attrib_idx = ctx.get_attrib_location(&cells.program, "alive");
+        if alive_attrib_idx >= 0 {
+            let alive_attrib_idx = alive_attrib_idx as u32;
+            ctx.bind_buffer(
+                WebGlRenderingContext::ARRAY_BUFFER,
+                Some(&cells.alive.buffer),
+            );
+            ctx.vertex_attrib_pointer_with_i32(
+                alive_attrib_idx,
+                1,
+                WebGlRenderingContext::FLOAT,
+                false,
+                0,
+                0,
+            );
+            ctx.enable_vertex_attrib_array(alive_attrib_idx);
+        }
+
+        ctx.draw_arrays(
+            WebGlRenderingContext::TRIANGLES,
+            0,
+            cells.rects.vertex_count as i32,
+        );
+    }
+}
 
 #[repr(C)]
 struct Vec2<T> {
@@ -67,10 +175,20 @@ fn link_program(
     }
 }
 
+struct WebGlBufferedData {
+    buffer: WebGlBuffer,
+    vertex_count: usize,
+}
+
+impl WebGlBufferedData {
+    fn len(&self) -> usize {
+        self.vertex_count
+    }
+}
+
 struct GridRenderProgram {
     program: WebGlProgram,
-    buffer: WebGlBuffer,
-    bufferlen: usize,
+    buffer: WebGlBufferedData,
 }
 
 fn initialize_grid(size: Size, ctx: &WebGlRenderingContext) -> GridRenderProgram {
@@ -129,24 +247,97 @@ fn initialize_grid(size: Size, ctx: &WebGlRenderingContext) -> GridRenderProgram
 
     GridRenderProgram {
         program: grid_program,
-        buffer: grid_buffer,
-        bufferlen: grid_lines.len(),
+        buffer: WebGlBufferedData {
+            buffer: grid_buffer,
+            vertex_count: grid_lines.len(),
+        },
     }
 }
 
-fn render_grid(size: Size, ctx: &WebGlRenderingContext) {
-    let grid = initialize_grid(size, &ctx);
-    ctx.use_program(Some(&grid.program));
+fn get_rect(x: f32, y: f32) -> [Vec2<f32>; 6] {
+    [
+        Vec2::new(x + 0.05, y + 0.05),
+        Vec2::new(x + 0.05, y + 0.95),
+        Vec2::new(x + 0.95, y + 0.05),
+        Vec2::new(x + 0.05, y + 0.95),
+        Vec2::new(x + 0.95, y + 0.05),
+        Vec2::new(x + 0.95, y + 0.95),
+    ]
+}
 
-    if let Some(size_location) = ctx.get_uniform_location(&grid.program, "size") {
-        ctx.uniform2i(Some(&size_location), size.width as i32, size.height as i32);
+struct CellRenderProgram {
+    program: WebGlProgram,
+    rects: WebGlBufferedData,
+    alive: WebGlBufferedData,
+}
+
+fn init_cells(size: Size, ctx: &WebGlRenderingContext) -> CellRenderProgram {
+    let vertex_shader = compile_shader(
+        ctx,
+        WebGlRenderingContext::VERTEX_SHADER,
+        include_str!("cells_vertex_shader.glsl"),
+    )
+    .unwrap();
+
+    let frag_shader = compile_shader(
+        &ctx,
+        WebGlRenderingContext::FRAGMENT_SHADER,
+        r#"
+        varying lowp float frag_alive;
+        void main() {
+            gl_FragColor = vec4(1.0 - frag_alive, 1.0 - frag_alive, 1.0 - frag_alive, 1.0);
+        }
+    "#,
+    )
+    .unwrap();
+
+    let program = link_program(&ctx, &vertex_shader, &frag_shader).unwrap();
+
+    let mut cell_rects = Vec::with_capacity(size.height * size.width);
+
+    for y in 0..size.height {
+        for x in 0..size.width {
+            let rect: [Vec2<f32>; 6] = get_rect(x as f32, y as f32);
+
+            cell_rects.push(rect);
+        }
     }
 
-    ctx.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&grid.buffer));
-    ctx.vertex_attrib_pointer_with_i32(0, 2, WebGlRenderingContext::FLOAT, false, 0, 0);
-    ctx.enable_vertex_attrib_array(0);
+    let rect_buffer = ctx.create_buffer().unwrap();
+    ctx.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&rect_buffer));
 
-    ctx.draw_arrays(WebGlRenderingContext::LINES, 0, (grid.bufferlen) as i32);
+    // Note that `Float32Array::view` is somewhat dangerous (hence the
+    // `unsafe`!). This is creating a raw view into our module's
+    // `WebAssembly.Memory` buffer, but if we allocate more pages for ourself
+    // (aka do a memory allocation in Rust) it'll cause the buffer to change,
+    // causing the `Float32Array` to be invalid.
+    //
+    // As a result, after `Float32Array::view` we have to be very careful not to
+    // do any memory allocations before it's dropped.
+    unsafe {
+        let vert_array = js_sys::Float32Array::view(array_to_flat_slice(cell_rects.as_slice()));
+
+        ctx.buffer_data_with_array_buffer_view(
+            WebGlRenderingContext::ARRAY_BUFFER,
+            &vert_array,
+            WebGlRenderingContext::STATIC_DRAW,
+        );
+    }
+
+    let alive_buffer = ctx.create_buffer().unwrap();
+    ctx.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&alive_buffer));
+
+    CellRenderProgram {
+        program: program,
+        rects: WebGlBufferedData {
+            buffer: rect_buffer,
+            vertex_count: cell_rects.len() * 6,
+        },
+        alive: WebGlBufferedData {
+            buffer: alive_buffer,
+            vertex_count: cell_rects.len() * 6,
+        },
+    }
 }
 
 // Safety: should be safe to do, as Vec2 is declared as #[repr(C)] so we are guaranteed two fields are layed out adjacent
@@ -157,116 +348,28 @@ unsafe fn as_flat_slice<T>(slice: &[Vec2<T>]) -> &[T] {
     std::slice::from_raw_parts(raw_ptr, len)
 }
 
+unsafe fn array_to_flat_slice<T>(slice: &[[Vec2<T>; 6]]) -> &[T] {
+    let raw_ptr = slice.as_ptr() as *const T;
+    let len = slice.len() * 6 * 2;
+
+    std::slice::from_raw_parts(raw_ptr, len)
+}
+
 impl Renderer for WebGLRenderer {
     type Context = WebGlRenderingContext;
 
-    fn init(_: &Self::Context) -> WebGLRenderer {
-        WebGLRenderer {}
+    fn init(universe: &Universe, context: &Self::Context) -> WebGLRenderer {
+        WebGLRenderer {
+            grid: initialize_grid(universe.size, context),
+            cells: init_cells(universe.size, context),
+            size: universe.size,
+        }
     }
 
     fn render_to_canvas(&mut self, universe: &Universe, ctx: &Self::Context) {
         ctx.clear_color(1.0, 1.0, 1.0, 1.0);
         ctx.clear(WebGlRenderingContext::COLOR_BUFFER_BIT);
-        render_grid(universe.size, ctx);
-        return;
-        let vertex_shader = compile_shader(
-            ctx,
-            WebGlRenderingContext::VERTEX_SHADER,
-            r#"
-            attribute vec2 position;
-            attribute bool alive;
-            void main() {
-                gl_Position = position;
-            }
-        "#,
-        )
-        .unwrap();
-
-        let frag_shader = compile_shader(
-            &ctx,
-            WebGlRenderingContext::FRAGMENT_SHADER,
-            r#"
-            void main() {
-                gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
-            }
-        "#,
-        )
-        .unwrap();
-
-        let program = link_program(&ctx, &vertex_shader, &frag_shader).unwrap();
-        ctx.use_program(Some(&program));
-
-        let vertices: [f32; 9] = [-0.7, -0.7, 0.0, 0.7, -0.7, 0.0, 0.0, 0.7, 0.0];
-
-        let mut coordinates: Vec<(i32, i32)> = universe
-            .get_cells()
-            .iter()
-            .enumerate()
-            .map(|(idx, _)| universe.size.get_address(idx))
-            .map(|address| (address.1 as i32, address.0 as i32))
-            .collect();
-
-        let coordinate_buffer = ctx.create_buffer().unwrap();
-        ctx.bind_buffer(
-            WebGlRenderingContext::ARRAY_BUFFER,
-            Some(&coordinate_buffer),
-        );
-
-        // Note that `Float32Array::view` is somewhat dangerous (hence the
-        // `unsafe`!). This is creating a raw view into our module's
-        // `WebAssembly.Memory` buffer, but if we allocate more pages for ourself
-        // (aka do a memory allocation in Rust) it'll cause the buffer to change,
-        // causing the `Float32Array` to be invalid.
-        //
-        // As a result, after `Float32Array::view` we have to be very careful not to
-        // do any memory allocations before it's dropped.
-        unsafe {
-            let vert_array = js_sys::Int32Array::view_mut_raw(
-                coordinates.as_mut_ptr() as *mut i32,
-                coordinates.len() * 2,
-            );
-
-            ctx.buffer_data_with_array_buffer_view(
-                WebGlRenderingContext::ARRAY_BUFFER,
-                &vert_array,
-                WebGlRenderingContext::STATIC_DRAW,
-            );
-        }
-
-        let cell_buffer = ctx.create_buffer().unwrap();
-        ctx.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&cell_buffer));
-
-        // Note that `Float32Array::view` is somewhat dangerous (hence the
-        // `unsafe`!). This is creating a raw view into our module's
-        // `WebAssembly.Memory` buffer, but if we allocate more pages for ourself
-        // (aka do a memory allocation in Rust) it'll cause the buffer to change,
-        // causing the `Float32Array` to be invalid.
-        //
-        // As a result, after `Float32Array::view` we have to be very careful not to
-        // do any memory allocations before it's dropped.
-        unsafe {
-            let vert_array = js_sys::Int8Array::view_mut_raw(
-                universe.cells() as *mut Cell as *mut u8 as *mut i8,
-                universe.get_cells().len(),
-            );
-
-            ctx.buffer_data_with_array_buffer_view(
-                WebGlRenderingContext::ARRAY_BUFFER,
-                &vert_array,
-                WebGlRenderingContext::DYNAMIC_DRAW,
-            );
-        }
-
-        ctx.vertex_attrib_pointer_with_i32(0, 3, WebGlRenderingContext::FLOAT, false, 0, 0);
-        ctx.enable_vertex_attrib_array(0);
-
-        ctx.clear_color(0.0, 0.0, 0.0, 1.0);
-        ctx.clear(WebGlRenderingContext::COLOR_BUFFER_BIT);
-
-        ctx.draw_arrays(
-            WebGlRenderingContext::TRIANGLES,
-            0,
-            (vertices.len() / 3) as i32,
-        );
+        self.render_grid(universe.size, ctx);
+        self.render_cells(universe, ctx);
     }
 }

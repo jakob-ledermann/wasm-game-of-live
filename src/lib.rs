@@ -35,7 +35,7 @@ pub struct Universe {
     cells: [Vec<Cell>; 2],
 }
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 struct Size {
     width: usize,
     height: usize,
@@ -186,12 +186,12 @@ impl Universe {
     }
 
     pub fn render_to_canvas_webgl(&self, context: web_sys::WebGlRenderingContext) -> () {
-        let mut renderer = webgl_renderer::WebGLRenderer::init(&context);
+        let mut renderer = webgl_renderer::WebGLRenderer::init(self, &context);
         renderer.render_to_canvas(self, &context);
     }
 
     pub fn render_to_canvas_2d(&self, context: web_sys::CanvasRenderingContext2d) -> () {
-        let mut renderer = canvas_renderer::CanvasRenderer::init(&context);
+        let mut renderer = canvas_renderer::CanvasRenderer::init(self, &context);
         renderer.render_to_canvas(self, &context)
     }
 

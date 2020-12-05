@@ -49,7 +49,7 @@ impl CanvasRenderer {
 impl Renderer for CanvasRenderer {
     type Context = web_sys::CanvasRenderingContext2d;
 
-    fn init(_: &Self::Context) -> Self {
+    fn init(_: &Universe, _: &Self::Context) -> Self {
         CanvasRenderer {}
     }
 
