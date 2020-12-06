@@ -4,6 +4,7 @@ mod utils;
 use wasm_bindgen::prelude::*;
 
 pub mod universe_builder;
+pub mod timer;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -52,6 +53,7 @@ impl Universe {
 use std::fmt;
 use crate::Cell::{Alive, Dead};
 use crate::universe_builder::*;
+use crate::timer::Timer;
 
 impl fmt::Display for Universe {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
@@ -78,6 +80,7 @@ impl Universe {
     }
 
     pub fn tick(&mut self) {
+        let _timer = Timer::new("Universe::tick");
         let mut next = self.cells.clone();
 
         for row in 0..self.height {
