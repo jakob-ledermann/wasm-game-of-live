@@ -138,9 +138,8 @@ impl Universe {
             };
 
             let _timer = Timer::new("new generation");
-            let mut row = 0usize;
-            let mut col = 0usize;
             for (idx, cell) in active_cells.iter().enumerate() {
+                let (row, col) = size.get_address(idx);
                 let live_neighbors = Universe::live_neighbor_count(size, active_cells, row, col);
 
                 let next_cell = match (cell, live_neighbors) {
@@ -197,7 +196,7 @@ impl Universe {
 
     pub fn toggle_cell(&mut self, row: u32, col: u32) {
         let idx = self.size.get_index(row as usize, col as usize);
-        self.get_cells()[idx].toggle();
+        self.get_cells_mut()[idx].toggle();
     }
 }
 
@@ -206,10 +205,14 @@ impl Universe {
         &self.cells[self.active]
     }
 
+    pub fn get_cells_mut(&mut self) -> &mut [Cell] {
+        &mut self.cells[self.active]
+    }
+
     pub fn set_cells(&mut self, cells: &[(usize, usize)]) {
         for (row, col) in cells.iter().cloned() {
             let idx = self.size.get_index(row, col);
-            self.get_cells()[idx] = Cell::Alive;
+            self.get_cells_mut()[idx] = Cell::Alive;
         }
     }
 }

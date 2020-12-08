@@ -1,18 +1,18 @@
 use wasm_bindgen::prelude::*;
 
-use crate::{Cell, Universe, utils};
+use crate::{utils, Cell, Size, Universe};
 
 #[wasm_bindgen]
 pub struct EmptyUniverse;
 
 #[wasm_bindgen]
 pub struct UniverseWithWidth {
-    width: usize
+    width: usize,
 }
 
 #[wasm_bindgen]
 pub struct UniverseWithHeight {
-    height: usize
+    height: usize,
 }
 
 #[wasm_bindgen]
@@ -25,17 +25,13 @@ pub struct ScaledUniverse {
 impl EmptyUniverse {
     pub fn with_width(self, width: usize) -> UniverseWithWidth {
         utils::set_panic_hook();
-        let state = UniverseWithWidth {
-            width
-        };
+        let state = UniverseWithWidth { width };
         state
     }
 
     pub fn with_height(self, height: usize) -> UniverseWithHeight {
         utils::set_panic_hook();
-        let state = UniverseWithHeight {
-            height
-        };
+        let state = UniverseWithHeight { height };
         state
     }
 }
@@ -68,30 +64,31 @@ impl ScaledUniverse {
         let width = self.width;
         let height = self.height;
         let mut cells = vec![Cell::Dead; width * height];
-        for index in 0..cells.len()
-        {
+        for index in 0..cells.len() {
             let random = random();
-            cells[index] = if random < 0.5 { Cell::Alive } else { Cell::Dead }
+            cells[index] = if random < 0.5 {
+                Cell::Alive
+            } else {
+                Cell::Dead
+            }
         }
 
         Universe {
-            width,
-            height,
-            cells,
+            size: Size { width, height },
+            cells: [cells.clone(), cells],
+            active: 0,
         }
     }
 
     pub fn empty(self) -> Universe {
         let width = self.width;
         let height = self.height;
-        let cells = (0..width * height)
-            .map(|_| Cell::Dead)
-            .collect();
+        let cells: Vec<Cell> = (0..width * height).map(|_| Cell::Dead).collect();
 
         Universe {
-            width,
-            height,
-            cells,
+            size: Size { width, height },
+            cells: [cells.clone(), cells],
+            active: 0,
         }
     }
 
@@ -101,13 +98,17 @@ impl ScaledUniverse {
 
         let mut cells = vec![Cell::Dead; width * height];
         for i in 0..cells.len() {
-            cells[i] = if i % 2 == 0 || i % 7 == 0 { Cell::Alive } else { Cell::Dead };
+            cells[i] = if i % 2 == 0 || i % 7 == 0 {
+                Cell::Alive
+            } else {
+                Cell::Dead
+            };
         }
 
         Universe {
-            width,
-            height,
-            cells,
+            size: Size { width, height },
+            cells: [cells.clone(), cells],
+            active: 0,
         }
     }
 }
