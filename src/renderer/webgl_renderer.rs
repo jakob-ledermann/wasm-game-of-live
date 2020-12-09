@@ -1,6 +1,5 @@
 use super::Renderer;
 use crate::{Cell, Size, Universe};
-use js_sys::{Float32Array, Int32Array};
 use web_sys::{WebGlBuffer, WebGlProgram, WebGlRenderingContext, WebGlShader};
 
 pub struct WebGLRenderer {
@@ -25,11 +24,7 @@ impl WebGLRenderer {
         ctx.vertex_attrib_pointer_with_i32(0, 2, WebGlRenderingContext::FLOAT, false, 0, 0);
         ctx.enable_vertex_attrib_array(0);
 
-        ctx.draw_arrays(
-            WebGlRenderingContext::LINES,
-            0,
-            (grid.buffer.vertex_count) as i32,
-        );
+        ctx.draw_arrays(WebGlRenderingContext::LINES, 0, (grid.buffer.len()) as i32);
     }
 
     fn render_cells(&self, universe: &Universe, ctx: &WebGlRenderingContext) {
@@ -56,15 +51,7 @@ impl WebGLRenderer {
             Some(&cells.alive.buffer),
         );
 
-        unsafe {
-            let vert_array = js_sys::Float32Array::view(&alive_data);
-
-            ctx.buffer_data_with_array_buffer_view(
-                WebGlRenderingContext::ARRAY_BUFFER,
-                &vert_array,
-                WebGlRenderingContext::DYNAMIC_DRAW,
-            );
-        }
+        copy_data_to_buffer(ctx, DataUsageKind::DynamicDraw, &alive_data);
 
         ctx.use_program(Some(&cells.program));
 
@@ -108,7 +95,7 @@ impl WebGLRenderer {
         ctx.draw_arrays(
             WebGlRenderingContext::TRIANGLES,
             0,
-            cells.rects.vertex_count as i32,
+            cells.rects.len() as i32,
         );
     }
 }
@@ -228,22 +215,7 @@ fn initialize_grid(size: Size, ctx: &WebGlRenderingContext) -> GridRenderProgram
 
     ctx.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&grid_buffer));
 
-    // Note that `Float32Array::view` is somewhat dangerous (hence the
-    // `unsafe`!). This is creating a raw view into our module's
-    // `WebAssembly.Memory` buffer, but if we allocate more pages for ourself
-    // (aka do a memory allocation in Rust) it'll cause the buffer to change,
-    // causing the `Float32Array` to be invalid.
-    //
-    // As a result, after `Float32Array::view` we have to be very careful not to
-    // do any memory allocations before it's dropped.
-    unsafe {
-        let vertex_array = Float32Array::view(as_flat_slice(&grid_lines));
-        ctx.buffer_data_with_array_buffer_view(
-            WebGlRenderingContext::ARRAY_BUFFER,
-            &vertex_array,
-            WebGlRenderingContext::STATIC_DRAW,
-        );
-    }
+    copy_data_to_buffer_vec2(ctx, DataUsageKind::StaticDraw, &grid_lines);
 
     GridRenderProgram {
         program: grid_program,
@@ -309,23 +281,11 @@ fn initialize_cells(size: Size, ctx: &WebGlRenderingContext) -> CellRenderProgra
     let rect_buffer = ctx.create_buffer().unwrap();
     ctx.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&rect_buffer));
 
-    // Note that `Float32Array::view` is somewhat dangerous (hence the
-    // `unsafe`!). This is creating a raw view into our module's
-    // `WebAssembly.Memory` buffer, but if we allocate more pages for ourself
-    // (aka do a memory allocation in Rust) it'll cause the buffer to change,
-    // causing the `Float32Array` to be invalid.
-    //
-    // As a result, after `Float32Array::view` we have to be very careful not to
-    // do any memory allocations before it's dropped.
-    unsafe {
-        let vert_array = js_sys::Float32Array::view(array_to_flat_slice(cell_rects.as_slice()));
-
-        ctx.buffer_data_with_array_buffer_view(
-            WebGlRenderingContext::ARRAY_BUFFER,
-            &vert_array,
-            WebGlRenderingContext::STATIC_DRAW,
-        );
-    }
+    copy_data_to_buffer_vec2(
+        ctx,
+        DataUsageKind::StaticDraw,
+        array_to_flat_slice(&cell_rects),
+    );
 
     let alive_buffer = ctx.create_buffer().unwrap();
     ctx.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&alive_buffer));
@@ -343,19 +303,58 @@ fn initialize_cells(size: Size, ctx: &WebGlRenderingContext) -> CellRenderProgra
     }
 }
 
-// Safety: should be safe to do, as Vec2 is declared as #[repr(C)] so we are guaranteed two fields are layed out adjacent
-unsafe fn as_flat_slice<T>(slice: &[Vec2<T>]) -> &[T] {
-    let raw_ptr = slice.as_ptr() as *const T;
-    let len = slice.len() * 2;
-
-    std::slice::from_raw_parts(raw_ptr, len)
+#[repr(u32)]
+enum DataUsageKind {
+    StaticDraw = WebGlRenderingContext::STATIC_DRAW,
+    DynamicDraw = WebGlRenderingContext::DYNAMIC_DRAW,
 }
 
-unsafe fn array_to_flat_slice<T>(slice: &[[Vec2<T>; 6]]) -> &[T] {
-    let raw_ptr = slice.as_ptr() as *const T;
-    let len = slice.len() * 6 * 2;
+fn copy_data_to_buffer(context: &WebGlRenderingContext, usage_kind: DataUsageKind, data: &[f32]) {
+    // Note that `Float32Array::view` is somewhat dangerous (hence the
+    // `unsafe`!). This is creating a raw view into our module's
+    // `WebAssembly.Memory` buffer, but if we allocate more pages for ourself
+    // (aka do a memory allocation in Rust) it'll cause the buffer to change,
+    // causing the `Float32Array` to be invalid.
+    //
+    // As a result, after `Float32Array::view` we have to be very careful not to
+    // do any memory allocations before it's dropped.
+    unsafe {
+        let vert_array = js_sys::Float32Array::view(data);
 
-    std::slice::from_raw_parts(raw_ptr, len)
+        context.buffer_data_with_array_buffer_view(
+            WebGlRenderingContext::ARRAY_BUFFER,
+            &vert_array,
+            usage_kind as u32,
+        );
+    }
+}
+
+fn copy_data_to_buffer_vec2(
+    context: &WebGlRenderingContext,
+    usage_kind: DataUsageKind,
+    data: &[Vec2<f32>],
+) {
+    copy_data_to_buffer(context, usage_kind, as_flat_slice(data));
+}
+
+fn as_flat_slice<T>(slice: &[Vec2<T>]) -> &[T] {
+    // Safety: should be safe to do, as Vec2 is declared as #[repr(C)] so we are guaranteed two fields are layed out adjacent
+    unsafe {
+        let raw_ptr = slice.as_ptr() as *const T;
+        let len = slice.len() * 2;
+
+        std::slice::from_raw_parts(raw_ptr, len)
+    }
+}
+
+fn array_to_flat_slice<T>(slice: &[[Vec2<T>; 6]]) -> &[Vec2<T>] {
+    // Safety: should be safe as arrays are continous memory regions
+    unsafe {
+        let raw_ptr = slice.as_ptr() as *const Vec2<T>;
+        let len = slice.len() * 6;
+
+        std::slice::from_raw_parts(raw_ptr, len)
+    }
 }
 
 impl Renderer for WebGLRenderer {
